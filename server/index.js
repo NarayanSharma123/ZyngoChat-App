@@ -96,6 +96,8 @@ const UserSchema = new mongoose.Schema({
   email: { type: String, unique: true },
   password: String,
   profileImage: String,
+  about: { type: String, default: "" },
+  phone: { type: String, default: "" },
 });
 const User = mongoose.model("User", UserSchema);
 
@@ -156,6 +158,59 @@ app.get("/api/profile", verifyAccessToken, async (req, res) => {
     if (!user) return res.status(404).json({ error: "User not found" });
     res.status(200).json(user);
   } catch (err) {
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Profile Update Route
+app.put("/api/update-profile", verifyAccessToken, async (req, res) => {
+  try {
+    const updates = {};
+    const allowedFields = ["firstName", "lastName", "about", "phone"];
+
+    allowedFields.forEach((field) => {
+      if (req.body[field] !== undefined) {
+        updates[field] = req.body[field];
+      }
+    });
+    // Profile Image Update Route
+    app.put(
+      "/api/update-profile-image",
+      verifyAccessToken,
+      upload.single("profileImage"),
+      async (req, res) => {
+        try {
+          if (!req.file) {
+            return res.status(400).json({ error: "No image file uploaded" });
+          }
+
+          const updatedUser = await User.findByIdAndUpdate(
+            req.user.id,
+            { $set: { profileImage: req.file.path } }, // Cloudinary ka URL
+            { new: true }
+          ).select("-password");
+
+          res
+            .status(200)
+            .json({ message: "Profile image updated", user: updatedUser });
+        } catch (err) {
+          console.error("Profile image update error:", err);
+          res.status(500).json({ error: "Server error" });
+        }
+      }
+    );
+
+    const updatedUser = await User.findByIdAndUpdate(
+      req.user.id,
+      { $set: updates },
+      { new: true }
+    ).select("-password");
+
+    if (!updatedUser) return res.status(404).json({ error: "User not found" });
+
+    res.status(200).json({ message: "Profile updated", user: updatedUser });
+  } catch (err) {
+    console.error("Profile update error:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
@@ -276,6 +331,17 @@ app.get("/chat/messages/:senderId/:receiverId", async (req, res) => {
     console.error("Error fetching messages:", error);
     res.status(500).json({ error: "Failed to fetch messages" });
   }
+});
+
+// logout system
+app.post("/api/logout", (req, res) => {
+  res.clearCookie("refreshToken", {
+    httpOnly: true,
+    secure: false,
+    sameSite: "Lax",
+  });
+
+  return res.status(200).json({ message: "Logged out successfully" });
 });
 
 // Start server
