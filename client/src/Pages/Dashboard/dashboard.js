@@ -4,11 +4,14 @@ import { Avatar } from "@mui/material";
 import MoreHorizIcon from "@mui/icons-material/MoreHoriz";
 import SocketContext from "../../Context/SocketContext";
 import EmojiPicker from "./Emoji/EmojiPicker";
+import AttachMenu from "./AttachMenu/AttachMenu";
+import ImagePreview from "./ImagePreview/ImagePreview";
+import Loader from "./Loader/Loader";
 import axios from "axios";
+import { InsertEmoticon } from "@mui/icons-material";
 import {
   FaPhoneAlt,
   FaVideo,
-  FaSmile,
   FaPaperclip,
   FaPaperPlane,
   FaMicrophone,
@@ -21,13 +24,24 @@ const Dashboard = () => {
   const navigate = useNavigate();
 
   const [inputText, setInputText] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
   const [loggedInUser, setLoggedInUser] = useState(null);
   const [messages, setMessages] = useState([]);
   const [contacts, setContacts] = useState([]);
   const [selectedContact, setSelectedContact] = useState(null);
   const [showOptions, setShowOptions] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false); // Sidebar open/close state
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const [selectedImageFile, setSelectedImageFile] = useState(null);
+  const [selectedImageForView, setSelectedImageForView] = useState(null);
+  const [block, setBlock] = useState(true);
+  const [contextMenu, setContextMenu] = useState({
+    visible: false,
+    x: 0,
+    y: 0,
+    contact: null,
+  });
 
   // SOCKET JOIN & LISTEN
   useEffect(() => {
@@ -101,6 +115,15 @@ const Dashboard = () => {
     };
     fetchMessages();
   }, [selectedContact]);
+  useEffect(() => {
+    const handleClickOutSide = () => {
+      if (contextMenu.visible) {
+        setContextMenu({ visible: false, x: 0, y: 0, contact: null });
+      }
+    };
+    window.addEventListener("click", handleClickOutSide);
+    return () => window.removeEventListener("click", handleClickOutSide);
+  }, [contextMenu]);
 
   const handleSendMessage = () => {
     if (inputText.trim() === "" || !selectedContact) return;
@@ -121,9 +144,77 @@ const Dashboard = () => {
     setInputText("");
   };
 
+  const handleSendImages = async (file, caption) => {
+    if (!loggedInUser || !selectedContact) return;
+
+    try {
+      setIsLoading(true);
+      const formData = new FormData();
+      formData.append("image", file);
+      formData.append("senderId", loggedInUser._id);
+      formData.append("receiverId", selectedContact._id);
+      formData.append("caption", caption);
+
+      const token = localStorage.getItem("accessToken");
+
+      const res = await axios.post(
+        "http://localhost:5000/chat/send-image",
+        formData,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "multipart/form-data",
+          },
+        }
+      );
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          senderId: loggedInUser._id,
+          receiverId: selectedContact._id,
+          imageUrl: res.data.data.imageUrl,
+          message: caption,
+          fromSelf: true,
+        },
+      ]);
+      setSelectedImageFile(null);
+    } catch (err) {
+      console.error("Error sending image:", err.response?.data || err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleEmojiSelect = (emoji) => {
     setInputText((prev) => prev + emoji.native);
     setShowEmojiPicker(false);
+  };
+  // handle block user
+  const handleBlockUser = async (contact, shouldBlock) => {
+    try {
+      const token = localStorage.getItem("accessToken");
+      const url = shouldBlock
+        ? "http://localhost:5000/chat/block-user"
+        : "http://localhost:5000/chat/unblock-user";
+
+      await axios.post(
+        url,
+        { blockedId: contact._id }, // ✅ sirf blockedId bhejna hai
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Local state update
+      setContacts((prev) =>
+        prev.map((c) =>
+          c._id === contact._id ? { ...c, isBlocked: shouldBlock } : c
+        )
+      );
+
+      setContextMenu({ visible: false, x: 0, y: 0, contact: null });
+    } catch (err) {
+      console.error("Error blocking/unblocking user:", err);
+    }
   };
 
   return (
@@ -190,25 +281,60 @@ const Dashboard = () => {
           {contacts.map((contact) => (
             <div
               key={contact._id}
-              className="flex items-center gap-2 p-2 border-b cursor-pointer"
+              className={`flex items-center gap-2 p-2 border-b cursor-pointer ${
+                contact.isBlocked ? "bg-gray-800 text-white" : "bg-white"
+              }`}
               onClick={() => {
                 setSelectedContact(contact);
                 setMessages([]);
-                setIsSidebarOpen(false); // Close sidebar after selecting contact (mobile)
+                setIsSidebarOpen(false);
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setContextMenu({
+                  visible: true,
+                  x: e.pageX,
+                  y: e.pageY,
+                  contact,
+                });
               }}
             >
               <Avatar src={contact.profileImage} alt={contact.firstName} />
               <div>
                 <h3>{contact.firstName}</h3>
-                <p className="text-[#aaaaaa]">Chat</p>
+                {contact.isBlocked ? (
+                  <span className="text-xs bg-gray-600 text-white px-2 py-0.5 rounded">
+                    Blocked
+                  </span>
+                ) : (
+                  <p className="text-[#aaaaaa]">Chat</p>
+                )}
               </div>
             </div>
           ))}
+          {contextMenu.visible && (
+            <div
+              className="absolute bg-white shadow-md rounded-md border w-40 z-50"
+              style={{ top: contextMenu.y, left: contextMenu.x }}
+            >
+              <div
+                className="cursor-pointer hover:bg-gray-100 px-4 py-2 text-sm"
+                onClick={() =>
+                  handleBlockUser(
+                    contextMenu.contact,
+                    !contextMenu.contact.isBlocked
+                  )
+                }
+              >
+                {contextMenu.contact.isBlocked ? "Unblock User" : "Block User"}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
       {/* CENTER CHAT AREA */}
-      <div className="flex flex-col h-screen w-full md:w-[50%]">
+      <div className="flex flex-col h-screen w-full md:w-[75%]">
         {/* Header */}
         <div className="bg-light_Purple h-[60px] flex items-center justify-between p-2">
           <div className="flex items-center">
@@ -235,27 +361,69 @@ const Dashboard = () => {
               }`}
             >
               <div
-                className={`max-w-[60%] px-4 py-2 rounded-lg text-sm ${
+                className={`max-w-[60%] px-2 py-1 rounded-lg text-sm shadow-md ${
                   msg.fromSelf
-                    ? "bg-blue-500 text-white rounded-br-none"
+                    ? "bg-blue-500 text-white rounded-br-none ml-auto"
                     : "bg-gray-200 text-black rounded-bl-none"
                 }`}
               >
-                <p>{msg.message}</p>
+                {msg.imageUrl && (
+                  <div className="flex justify-center">
+                    <img
+                      src={msg.imageUrl}
+                      alt="sent"
+                      className="w-60 h-60 object-cover rounded-md mb-2 cursor-pointer"
+                      onClick={() => setSelectedImageForView(msg.imageUrl)}
+                    />
+                  </div>
+                )}
+                {msg.message && <p className="leading-snug">{msg.message}</p>}
               </div>
             </div>
           ))}
+
+          {selectedImageForView && (
+            <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+              <img
+                src={selectedImageForView}
+                alt="full-view"
+                className="max-w-[90%] max-h-[90%] rounded-lg shadow-lg"
+              />
+              <button
+                className="absolute top-5 right-5 text-white text-3xl font-bold"
+                onClick={() => setSelectedImageForView(null)}
+              >
+                ✕
+              </button>
+            </div>
+          )}
         </div>
         <hr className="border-t border-gray-200" />
         {/* Message input area */}
         <div className="flex items-center px-4 py-2 bg-white border-t">
           <div className="flex items-center space-x-3 mr-3">
-            <FaSmile
+            <InsertEmoticon
               className="cursor-pointer"
               onClick={() => setShowEmojiPicker(!showEmojiPicker)}
             />
             {showEmojiPicker && <EmojiPicker onSelect={handleEmojiSelect} />}
-            <FaPaperclip className="cursor-pointer" />
+            <FaPaperclip
+              className="cursor-pointer"
+              onClick={() => setShowAttachMenu(!showAttachMenu)}
+            />
+            {showAttachMenu && (
+              <AttachMenu
+                onImageSelect={(file) => setSelectedImageFile(file)}
+                onClose={() => setShowAttachMenu(false)}
+              />
+            )}
+            {selectedImageFile && (
+              <ImagePreview
+                imageFile={selectedImageFile}
+                onSend={handleSendImages}
+                onCancel={() => setSelectedImageFile(null)}
+              />
+            )}
           </div>
           <input
             type="text"
@@ -276,9 +444,10 @@ const Dashboard = () => {
           </div>
         </div>
       </div>
+      {isLoading && <Loader />}
 
       {/* RIGHT PANEL - hidden on mobile */}
-      <div className="hidden md:block w-[25%] h-screen bg-light_Blue"></div>
+      {/* <div className="hidden md:block w-[25%] h-screen bg-light_Blue"></div> */}
     </div>
   );
 };

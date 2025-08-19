@@ -91,20 +91,43 @@ const storage = new CloudinaryStorage({
 const upload = multer({ storage });
 
 const UserSchema = new mongoose.Schema({
-  firstName: String,
-  lastName: String,
-  email: { type: String, unique: true },
-  password: String,
+  firstName: {
+    type: String,
+    required: [true, "First name is required"],
+    trim: true,
+  },
+  lastName: {
+    type: String,
+    required: [true, "Last name is required"],
+    trim: true,
+  },
+  email: {
+    type: String,
+    required: [true, "Email is required"],
+    unique: true,
+    trim: true,
+  },
+  password: {
+    type: String,
+    required: [true, "Password is required"],
+  },
   profileImage: String,
   about: { type: String, default: "" },
   phone: { type: String, default: "" },
+
+  blockedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
 });
+
 const User = mongoose.model("User", UserSchema);
 
 const MessageSchema = new mongoose.Schema({
   senderId: String,
   receiverId: String,
   message: String,
+  imageUrl: {
+    type: String,
+    default: null,
+  },
   timestamp: {
     type: Date,
     default: Date.now,
@@ -173,32 +196,6 @@ app.put("/api/update-profile", verifyAccessToken, async (req, res) => {
         updates[field] = req.body[field];
       }
     });
-    // Profile Image Update Route
-    app.put(
-      "/api/update-profile-image",
-      verifyAccessToken,
-      upload.single("profileImage"),
-      async (req, res) => {
-        try {
-          if (!req.file) {
-            return res.status(400).json({ error: "No image file uploaded" });
-          }
-
-          const updatedUser = await User.findByIdAndUpdate(
-            req.user.id,
-            { $set: { profileImage: req.file.path } }, // Cloudinary ka URL
-            { new: true }
-          ).select("-password");
-
-          res
-            .status(200)
-            .json({ message: "Profile image updated", user: updatedUser });
-        } catch (err) {
-          console.error("Profile image update error:", err);
-          res.status(500).json({ error: "Server error" });
-        }
-      }
-    );
 
     const updatedUser = await User.findByIdAndUpdate(
       req.user.id,
@@ -215,6 +212,33 @@ app.put("/api/update-profile", verifyAccessToken, async (req, res) => {
   }
 });
 
+// Profile Image Update Route
+app.put(
+  "/api/update-profile-image",
+  verifyAccessToken,
+  upload.single("profileImage"),
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No image file uploaded" });
+      }
+
+      const updatedUser = await User.findByIdAndUpdate(
+        req.user.id,
+        { $set: { profileImage: req.file.path } }, // Cloudinary ka URL
+        { new: true }
+      ).select("-password");
+
+      res
+        .status(200)
+        .json({ message: "Profile image updated", user: updatedUser });
+    } catch (err) {
+      console.error("Profile image update error:", err);
+      res.status(500).json({ error: "Server error" });
+    }
+  }
+);
+
 // signup route
 app.post("/api/signup", upload.single("profileImage"), async (req, res) => {
   try {
@@ -222,6 +246,15 @@ app.post("/api/signup", upload.single("profileImage"), async (req, res) => {
     console.log("REQ FILE:", req.file);
 
     const { firstName, lastName, email, password } = req.body;
+
+    if (
+      !firstName?.trim() ||
+      !lastName?.trim() ||
+      !email?.trim() ||
+      !password?.trim()
+    ) {
+      return res.status(400).json({ error: "All fields are required" });
+    }
     const profileImage = req.file?.path || req.body.profileImage;
 
     const existingUser = await User.findOne({ email });
@@ -303,12 +336,20 @@ app.post("/api/login", async (req, res) => {
 app.get("/chat/contacts/:userId", async (req, res) => {
   const { userId } = req.params;
   try {
+    const currentUser = await User.findById(userId);
+
     const contacts = await User.find(
-      { _id: { $ne: userId } }, // $ne ka matlab: not equal
+      { _id: { $ne: userId } },
       { firstName: 1, lastName: 1, profileImage: 1 }
     );
 
-    res.status(200).json({ contacts });
+    // Add isBlocked flag manually
+    const updatedContacts = contacts.map((contact) => ({
+      ...contact._doc,
+      isBlocked: currentUser.blockedUsers.includes(contact._id),
+    }));
+
+    res.status(200).json({ contacts: updatedContacts });
   } catch (error) {
     console.error("Error fetching contacts:", error);
     res.status(500).json({ message: "Server error fetching contacts" });
@@ -319,6 +360,15 @@ app.get("/chat/messages/:senderId/:receiverId", async (req, res) => {
   const { senderId, receiverId } = req.params;
 
   try {
+    const sender = await User.findById(senderId);
+    const receiver = await User.findById(receiverId);
+    if (
+      sender.blockedUsers.includes(receiverId) ||
+      receiver.blockedUsers.includes(senderId)
+    ) {
+      return res.status(403).json({ error: "You cannot chat with this user" });
+    }
+
     const messages = await Messages.find({
       $or: [
         { senderId, receiverId },
@@ -330,6 +380,106 @@ app.get("/chat/messages/:senderId/:receiverId", async (req, res) => {
   } catch (error) {
     console.error("Error fetching messages:", error);
     res.status(500).json({ error: "Failed to fetch messages" });
+  }
+});
+
+// image chat send route
+app.post("/chat/send-image", upload.single("image"), async (req, res) => {
+  try {
+    const { senderId, receiverId, caption } = req.body;
+
+    const sender = await User.findById(senderId);
+    const receiver = await User.findById(receiverId);
+    if (
+      sender.blockedUsers.includes(receiverId) ||
+      receiver.blockedUsers.includes(senderId)
+    ) {
+      return res
+        .status(403)
+        .json({ error: "You cannot send Images with this user" });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: "No image file uploaded" });
+    }
+    const newMessage = new Messages({
+      senderId,
+      receiverId,
+      message: caption || "",
+      imageUrl: req.file.path,
+      timestamp: new Date(),
+    });
+    await newMessage.save();
+
+    io.to(receiverId).emit("receive_message", {
+      senderId,
+      receiverId,
+      message: caption || "",
+      imageUrl: newMessage.imageUrl,
+      timestamp: newMessage.timestamp,
+    });
+
+    res.status(201).json({ message: "Image sent", data: newMessage });
+  } catch (error) {
+    console.error("Error sending image:", error);
+    res.status(500).json({ error: "Failed to send image" });
+  }
+});
+
+// Block user
+app.post("/chat/block-user", verifyAccessToken, async (req, res) => {
+  try {
+    const blockerId = req.user.id; // token se le rahe hain
+    const { blockedId } = req.body;
+
+    if (blockedId === blockerId) {
+      return res.status(400).json({ error: "You cannot block yourself" });
+    }
+
+    const user = await User.findById(blockerId);
+    if (!user) return res.status(400).json({ error: "Blocker not found" });
+
+    if (user.blockedUsers.includes(blockedId)) {
+      return res.status(400).json({ error: "User already blocked" });
+    }
+
+    user.blockedUsers.push(blockedId);
+    await user.save();
+
+    res.status(200).json({ message: "User blocked successfully" });
+  } catch (err) {
+    console.error("Block user error:", err);
+    res.status(500).json({ error: "Failed to block user" });
+  }
+});
+
+// Unblock user
+app.post("/chat/unblock-user", verifyAccessToken, async (req, res) => {
+  try {
+    const blockerId = req.user.id; // token se le rahe hain
+    const { blockedId } = req.body;
+
+    if (blockedId === blockerId) {
+      return res.status(400).json({ error: "You cannot unblock yourself" });
+    }
+
+    const user = await User.findById(blockerId);
+    if (!user) return res.status(400).json({ error: "User not found" });
+
+    if (!user.blockedUsers.includes(blockedId)) {
+      return res.status(400).json({ error: "User is not blocked" });
+    }
+
+    user.blockedUsers = user.blockedUsers.filter(
+      (id) => id.toString() !== blockedId.toString()
+    );
+
+    await user.save();
+
+    res.status(200).json({ message: "User unblocked successfully" });
+  } catch (err) {
+    console.error("Unblock user error:", err);
+    res.status(500).json({ error: "Failed to unblock user" });
   }
 });
 

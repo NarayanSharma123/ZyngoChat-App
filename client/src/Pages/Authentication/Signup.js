@@ -29,6 +29,17 @@ const Signup = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    if (
+      !formData.firstName.trim() ||
+      !formData.lastName.trim() ||
+      !formData.email.trim() ||
+      !formData.password.trim()
+    ) {
+      alert("All fields are required!");
+      return;
+    }
+
     const finalImage =
       preview ||
       "https://cdn.pixabay.com/photo/2017/11/10/05/48/user-2935527_1280.png";
