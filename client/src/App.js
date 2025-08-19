@@ -14,6 +14,9 @@ import { Routes, Route } from "react-router-dom";
 import { io } from "socket.io-client";
 import SocketContext from "./Context/SocketContext";
 
+import { ToastContainer } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
+
 const App = () => {
   const socketRef = useRef(null);
   const [isSocketReady, setIsSocketReady] = useState(false);
@@ -35,6 +38,8 @@ const App = () => {
 
   return (
     <SocketContext.Provider value={socketRef.current}>
+      <ToastContainer position="top-right" autoClose={3000} />
+
       <Routes>
         <Route path="/" element={<Welcome />} />
         <Route path="/user/signup" element={<Signup />} />

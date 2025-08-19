@@ -1,5 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "react-toastify";
+
 import axios from "axios";
 
 const Login = () => {
@@ -24,13 +26,11 @@ const Login = () => {
       localStorage.setItem("accessToken", accessToken);
       localStorage.setItem("user", JSON.stringify(user));
 
-      console.log("Login Success:", user?.firstName);
-      console.log("Login response:", response.data);
+      toast.success(`Login Success: ${user?.firstName || ""}`);
       navigate("/app/dashboard");
     } catch (error) {
-      console.error(
-        "Login Failed:",
-        error.response?.data?.message || error.message
+      toast.error(
+        error.response?.data?.message || error.message || "Login Failed"
       );
     }
   };

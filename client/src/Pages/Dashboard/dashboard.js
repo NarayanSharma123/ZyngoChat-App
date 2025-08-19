@@ -6,9 +6,13 @@ import SocketContext from "../../Context/SocketContext";
 import EmojiPicker from "./Emoji/EmojiPicker";
 import AttachMenu from "./AttachMenu/AttachMenu";
 import ImagePreview from "./ImagePreview/ImagePreview";
+import { formatLastSeen } from "./FormatLastSeen/FormatLastSeen";
+
 import Loader from "./Loader/Loader";
+import { toast } from "react-toastify";
 import axios from "axios";
 import { InsertEmoticon } from "@mui/icons-material";
+import CircleIcon from "@mui/icons-material/Circle";
 import {
   FaPhoneAlt,
   FaVideo,
@@ -35,13 +39,14 @@ const Dashboard = () => {
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [selectedImageFile, setSelectedImageFile] = useState(null);
   const [selectedImageForView, setSelectedImageForView] = useState(null);
-  const [block, setBlock] = useState(true);
   const [contextMenu, setContextMenu] = useState({
     visible: false,
     x: 0,
     y: 0,
     contact: null,
   });
+
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
 
   // SOCKET JOIN & LISTEN
   useEffect(() => {
@@ -74,12 +79,30 @@ const Dashboard = () => {
           headers: { Authorization: `Bearer ${token}` },
         });
         setLoggedInUser(res.data);
-      } catch (err) {
-        console.error("Error fetching profile", err);
+      } catch (error) {
+        toast.error(
+          error.response?.data?.message ||
+            error.message ||
+            "Something went wrong"
+        );
       }
     };
     fetchUser();
   }, []);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    socket.on("user_status", ({ userId, isOnline, lastSeen }) => {
+      setContacts((prev) =>
+        prev.map((c) => (c._id === userId ? { ...c, isOnline, lastSeen } : c))
+      );
+    });
+
+    return () => {
+      socket.off("user_status");
+    };
+  }, [socket]);
 
   // FETCH CONTACTS FROM SERVER
   useEffect(() => {
@@ -95,7 +118,11 @@ const Dashboard = () => {
         );
         setContacts(res.data.contacts);
       } catch (err) {
-        console.error("Error fetching contacts", err);
+        toast.error(
+          err.response?.data?.message ||
+            err.message ||
+            "Error fetching contacts"
+        );
       }
     };
     fetchContacts();
@@ -110,11 +137,16 @@ const Dashboard = () => {
         );
         setMessages(res.data.messages);
       } catch (err) {
-        console.error("Error fetching messages", err);
+        toast.error(
+          err.response?.data?.message ||
+            err.message ||
+            "Error fetching messages"
+        );
       }
     };
     fetchMessages();
   }, [selectedContact]);
+
   useEffect(() => {
     const handleClickOutSide = () => {
       if (contextMenu.visible) {
@@ -132,16 +164,20 @@ const Dashboard = () => {
       receiverId: selectedContact._id,
       message: inputText,
     };
-    socket.emit("send_message", messageData);
-    setMessages((prev) => [
-      ...prev,
-      {
-        ...messageData,
-        timestamp: new Date(),
-        fromSelf: true,
-      },
-    ]);
-    setInputText("");
+    try {
+      socket.emit("send_message", messageData);
+      setMessages((prev) => [
+        ...prev,
+        {
+          ...messageData,
+          timestamp: new Date(),
+          fromSelf: true,
+        },
+      ]);
+      setInputText("");
+    } catch (err) {
+      toast.error(err.message || "Error sending message");
+    }
   };
 
   const handleSendImages = async (file, caption) => {
@@ -180,7 +216,7 @@ const Dashboard = () => {
       ]);
       setSelectedImageFile(null);
     } catch (err) {
-      console.error("Error sending image:", err.response?.data || err.message);
+      toast.error("Error sending image:", err.response?.data || err.message);
     } finally {
       setIsLoading(false);
     }
@@ -190,31 +226,10 @@ const Dashboard = () => {
     setInputText((prev) => prev + emoji.native);
     setShowEmojiPicker(false);
   };
-  // handle block user
-  const handleBlockUser = async (contact, shouldBlock) => {
-    try {
-      const token = localStorage.getItem("accessToken");
-      const url = shouldBlock
-        ? "http://localhost:5000/chat/block-user"
-        : "http://localhost:5000/chat/unblock-user";
 
-      await axios.post(
-        url,
-        { blockedId: contact._id }, // ✅ sirf blockedId bhejna hai
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-
-      // Local state update
-      setContacts((prev) =>
-        prev.map((c) =>
-          c._id === contact._id ? { ...c, isBlocked: shouldBlock } : c
-        )
-      );
-
-      setContextMenu({ visible: false, x: 0, y: 0, contact: null });
-    } catch (err) {
-      console.error("Error blocking/unblocking user:", err);
-    }
+  // BEFORE UPDATE
+  const handleUpdateLinks = () => {
+    toast.info("🚧 This feature will be available in the next update.");
   };
 
   return (
@@ -281,9 +296,9 @@ const Dashboard = () => {
           {contacts.map((contact) => (
             <div
               key={contact._id}
-              className={`flex items-center gap-2 p-2 border-b cursor-pointer ${
-                contact.isBlocked ? "bg-gray-800 text-white" : "bg-white"
-              }`}
+              className={
+                "flex items-center gap-2 p-2 border-b cursor-pointer bg-white"
+              }
               onClick={() => {
                 setSelectedContact(contact);
                 setMessages([]);
@@ -302,34 +317,23 @@ const Dashboard = () => {
               <Avatar src={contact.profileImage} alt={contact.firstName} />
               <div>
                 <h3>{contact.firstName}</h3>
-                {contact.isBlocked ? (
-                  <span className="text-xs bg-gray-600 text-white px-2 py-0.5 rounded">
-                    Blocked
-                  </span>
-                ) : (
-                  <p className="text-[#aaaaaa]">Chat</p>
-                )}
+                <p className="text-[#aaaaaa] flex items-center gap-1">
+                  {contact.isOnline ? (
+                    <>
+                      <CircleIcon
+                        style={{ color: "green", fontSize: 14 }}
+                      ></CircleIcon>
+                      Online
+                    </>
+                  ) : contact.lastSeen ? (
+                    `Last seen ${formatLastSeen(contact.lastSeen)}`
+                  ) : (
+                    "Offline"
+                  )}
+                </p>
               </div>
             </div>
           ))}
-          {contextMenu.visible && (
-            <div
-              className="absolute bg-white shadow-md rounded-md border w-40 z-50"
-              style={{ top: contextMenu.y, left: contextMenu.x }}
-            >
-              <div
-                className="cursor-pointer hover:bg-gray-100 px-4 py-2 text-sm"
-                onClick={() =>
-                  handleBlockUser(
-                    contextMenu.contact,
-                    !contextMenu.contact.isBlocked
-                  )
-                }
-              >
-                {contextMenu.contact.isBlocked ? "Unblock User" : "Block User"}
-              </div>
-            </div>
-          )}
         </div>
       </div>
 
@@ -342,15 +346,41 @@ const Dashboard = () => {
               src={selectedContact?.profileImage}
               alt={selectedContact?.firstName}
             />
+
             <div className="ml-2">
               <h3>{selectedContact?.firstName || "Select a contact"}</h3>
+              {selectedContact && (
+                <>
+                  <p className="text-[#aaaaaa] flex items-center gap-1">
+                    {selectedContact.isOnline ? (
+                      <>
+                        <CircleIcon
+                          style={{ color: "green", fontSize: 14 }}
+                        ></CircleIcon>
+                        Online
+                      </>
+                    ) : selectedContact.lastSeen ? (
+                      `Last seen ${formatLastSeen(selectedContact.lastSeen)}`
+                    ) : (
+                      "Offline"
+                    )}
+                  </p>
+                </>
+              )}
             </div>
           </div>
           <div className="flex">
-            <FaPhoneAlt className="mx-2 cursor-pointer" />
-            <FaVideo className="mx-2 cursor-pointer" />
+            <FaPhoneAlt
+              className="mx-2 cursor-pointer"
+              onClick={handleUpdateLinks}
+            />
+            <FaVideo
+              className="mx-2 cursor-pointer"
+              onClick={handleUpdateLinks}
+            />
           </div>
         </div>
+
         {/* Chat messages */}
         <div className="flex-1 p-3 overflow-y-auto space-y-2 flex flex-col">
           {messages.map((msg, index) => (
@@ -377,7 +407,25 @@ const Dashboard = () => {
                     />
                   </div>
                 )}
-                {msg.message && <p className="leading-snug">{msg.message}</p>}
+                {msg.message && (
+                  <p className="leading-snug">
+                    {msg.message.split(urlRegex).map((part, i) =>
+                      urlRegex.test(part) ? (
+                        <a
+                          key={i}
+                          href={part}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-white-300 underline hover:text-blue-900"
+                        >
+                          {part}
+                        </a>
+                      ) : (
+                        part
+                      )
+                    )}
+                  </p>
+                )}
               </div>
             </div>
           ))}
@@ -434,7 +482,10 @@ const Dashboard = () => {
           />
           <div className="ml-3">
             {inputText.length === 0 ? (
-              <FaMicrophone className="cursor-pointer" />
+              <FaMicrophone
+                className="cursor-pointer"
+                onClick={handleUpdateLinks}
+              />
             ) : (
               <FaPaperPlane
                 className="cursor-pointer transform rotate-45"

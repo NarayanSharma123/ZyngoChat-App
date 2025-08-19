@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "react-toastify";
 import axios from "axios";
 
 const Signup = () => {
@@ -44,7 +45,6 @@ const Signup = () => {
       preview ||
       "https://cdn.pixabay.com/photo/2017/11/10/05/48/user-2935527_1280.png";
 
-    // console.log({ ...formData, profileImage: finalImage });
     const form = new FormData();
     form.append("firstName", formData.firstName);
     form.append("lastName", formData.lastName);
@@ -62,9 +62,12 @@ const Signup = () => {
         form
       );
       navigate("/user/login");
-      console.log("Signup successful:", response.data);
+
+      toast.success(response.data.message || "Signup successful!");
     } catch (error) {
-      console.error("Signup failed:", error);
+      toast.error(
+        error.response?.data?.message || error.message || "Signup Failed"
+      );
     }
   };
 

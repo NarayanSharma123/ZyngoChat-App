@@ -2,6 +2,7 @@ import React, { useState, useEffect, useContext } from "react";
 import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
 import SocketContext from "../../../Context/SocketContext";
 
+import { toast } from "react-toastify";
 import axios from "axios";
 
 const Account = () => {
@@ -36,7 +37,9 @@ const Account = () => {
       setAbout(res.data?.about || "I am using ZyngoChat");
       setPhone(res.data?.phone || "");
     } catch (error) {
-      console.error("Error fetching profile:", error);
+      toast.error(
+        error.response?.data?.message || error.message || "Something went wrong"
+      );
       setPreview(
         "https://cdn.pixabay.com/photo/2017/11/10/05/48/user-2935527_1280.png"
       );
@@ -70,8 +73,12 @@ const Account = () => {
         );
 
         setPreview(res.data.user.profileImage); // naya Cloudinary URL
-      } catch (err) {
-        console.error("Image update failed:", err);
+      } catch (error) {
+        toast.error(
+          error.response?.data?.message ||
+            error.message ||
+            "Image update failed"
+        );
       }
     }
   };
@@ -91,7 +98,9 @@ const Account = () => {
       setEditingField(null);
       fetchSignupData(); // update UI after save
     } catch (error) {
-      console.error("Update failed:", error);
+      toast.error(
+        error.response?.data?.message || error.message || "Update failed"
+      );
     }
   };
 
@@ -111,10 +120,14 @@ const Account = () => {
         socket.disconnect();
       }
 
-      window.location.href = "/user/login";
-      console.log("Logout sucessfully");
+      toast.success("Logout successfully");
+      setTimeout(() => {
+        window.location.href = "/user/login";
+      }, 2500);
     } catch (error) {
-      console.error(`Logout system: ${error}`);
+      toast.error(
+        error.response?.data?.message || error.message || "Logout failed"
+      );
     }
   };
 
