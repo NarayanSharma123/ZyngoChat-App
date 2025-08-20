@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useState } from "react";
+import React, { useContext, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Avatar } from "@mui/material";
 import MoreHorizIcon from "@mui/icons-material/MoreHoriz";
@@ -45,6 +45,8 @@ const Dashboard = () => {
     y: 0,
     contact: null,
   });
+
+  const chatContainerRef = useRef(null);
 
   const urlRegex = /(https?:\/\/[^\s]+)/g;
 
@@ -135,7 +137,11 @@ const Dashboard = () => {
         const res = await axios.get(
           `http://localhost:5000/chat/messages/${loggedInUser._id}/${selectedContact._id}`
         );
-        setMessages(res.data.messages);
+        const updateMessages = res.data.messages.map((msg) => ({
+          ...msg,
+          fromSelf: msg.senderId === loggedInUser._id,
+        }));
+        setMessages(updateMessages);
       } catch (err) {
         toast.error(
           err.response?.data?.message ||
@@ -226,6 +232,22 @@ const Dashboard = () => {
     setInputText((prev) => prev + emoji.native);
     setShowEmojiPicker(false);
   };
+
+  const scrollToBottom = () => {
+    // messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTo({
+        top: chatContainerRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+
+      // chatContainerRef.current.scrollTop =
+      //   chatContainerRef.current.scrollHeight;
+    }
+  };
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
   // BEFORE UPDATE
   const handleUpdateLinks = () => {
@@ -382,7 +404,10 @@ const Dashboard = () => {
         </div>
 
         {/* Chat messages */}
-        <div className="flex-1 p-3 overflow-y-auto space-y-2 flex flex-col">
+        <div
+          ref={chatContainerRef}
+          className="flex-1 p-3 overflow-y-auto space-y-2 flex flex-col"
+        >
           {messages.map((msg, index) => (
             <div
               key={index}
@@ -478,6 +503,18 @@ const Dashboard = () => {
             placeholder="Type a message"
             className="flex-grow border-none outline-none bg-gray-100 rounded-full px-4 py-2 text-sm"
             value={inputText}
+            onKeyDown={(e) => {
+              if (
+                e.key === "Enter" &&
+                !e.shiftKey &&
+                !e.ctrlKey &&
+                !e.altKey &&
+                !e.metaKey
+              ) {
+                e.preventDefault();
+                handleSendMessage();
+              }
+            }}
             onChange={(e) => setInputText(e.target.value)}
           />
           <div className="ml-3">
